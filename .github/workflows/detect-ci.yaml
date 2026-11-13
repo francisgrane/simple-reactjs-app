@@ -1,0 +1,69 @@
+
+name: Folder Change Detection
+
+on:
+  pull_request:
+    branches:
+      - master
+
+permissions:
+  contents: read
+
+jobs:
+  detect-changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+
+    outputs:
+      folders: ${{ steps.detect.outputs.folders }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed folders
+        id: detect
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          declare -A changed_folders
+
+          while IFS= read -r -d '' file; do
+            folder="${file%%/*}"
+
+            if [[ "$folder" == "src" || "$folder" == "public" ]]; then
+              changed_folders["$folder"]=1
+            fi
+          done < <(git diff --name-only -z "$BASE_SHA...$HEAD_SHA")
+
+          folders_json=$(
+            printf '%s\n' "${!changed_folders[@]}" |
+            jq -Rsc 'split("\n") | map(select(length > 0))'
+          )
+
+          echo "folders=$folders_json" >> "$GITHUB_OUTPUT"
+
+          echo "Detected folders:"
+          echo "$folders_json" | jq .
+
+  run-src:
+    name: Run SRC Job
+    needs: detect-changes
+    if: contains(fromJSON(needs.detect-changes.outputs.folders), 'src')
+    runs-on: ubuntu-latest
+
+    steps:
+      - run: echo "Changes detected in SRC folder"
+
+  run-public:
+    name: Run PUBLIC Job
+    needs: detect-changes
+    if: contains(fromJSON(needs.detect-changes.outputs.folders), 'public')
+    runs-on: ubuntu-latest
+
+    steps:
+      - run: echo "Changes detected in PUBLIC folder"
